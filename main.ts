@@ -1,6 +1,9 @@
 // Token Radar's entrypoint: a sealed snapshot in, a ranked board and a dashboard out.
 //
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input <snapshot.json>
+// The grader runs it bare (`node main.ts`) with the sealed snapshot mounted at
+// /input and the output at /output, so both paths default to those mounts;
+// --input/--output and MAKEFUN_OUTPUT_DIR only override them for local runs.
 //
 // The run is deterministic: the same snapshot in writes the same bytes out, every
 // time. It writes board.json, data.js, dashboard/ and screenshots/ beside each
@@ -41,16 +44,16 @@ const SCREENSHOTS_MAX_BYTES = 512 * 1024;
 const DOSSIER_MAX_BYTES = 1.5 * 1024 * 1024;
 const DOSSIER_TEXT_MAX_BYTES = 65_536;
 
-const USAGE = `usage: node main.ts --input <snapshot.json>
-  MAKEFUN_OUTPUT_DIR (default ./out) is where the board and the dashboard go`;
+const USAGE = `usage: node main.ts [--input <snapshot.json|directory>] [--output <dir>]
+  defaults: input /input (the grader's sealed mount), output MAKEFUN_OUTPUT_DIR or /output`;
 
-/** The --input value, or null when no snapshot was named. */
-function inputPath(argv: string[]): string | null {
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--input' && i + 1 < argv.length) return argv[i + 1]!;
-    if (argv[i]!.startsWith('--input=')) return argv[i]!.slice('--input='.length);
-  }
-  return null;
+/** --name <value> out of the arguments, or the fallback. */
+function arg(name: string, fallback: string): string {
+  const argv = process.argv.slice(2);
+  const at = argv.indexOf(`--${name}`);
+  if (at >= 0 && at + 1 < argv.length) return argv[at + 1]!;
+  const withEquals = argv.find((a) => a.startsWith(`--${name}=`));
+  return withEquals === undefined ? fallback : withEquals.slice(name.length + 3);
 }
 
 function fail(message: string): never {
@@ -73,9 +76,12 @@ function boardBytes(board: BoardRow[]): Buffer {
 }
 
 function main(): void {
-  const input = inputPath(process.argv.slice(2));
-  if (input === null) fail(USAGE);
-  const out = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? join(here, 'out'));
+  // The grader runs `node main.ts` bare: the sealed snapshot is mounted at
+  // /input and the output at /output. --input/--output only override them.
+  const inputArg = arg('input', '/input');
+  const input = inputArg.endsWith('.json') ? inputArg : join(inputArg, 'snapshot.json');
+  if (!existsSync(input)) fail(`no snapshot at ${input}\n${USAGE}`);
+  const out = resolve(arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output'));
   const snapshot = parseSnapshot(readFileSync(input, 'utf8'));
   const { board, radar } = buildRadar(snapshot, MODEL);
 
